@@ -49,17 +49,17 @@ def pointwise_variance(values, jac_dists, min_var_factor = 1e-2, alpha = 1, vari
     the variance of the contribution os different from the (sampling)weight of the point,
     since points with lower similarity will have a higher variance, but will be less likely to be sampled
     '''
-    if len(values.shape) > 1:
-        if values.shape[-1] > 1:
-            raise ValueError(f'value should have only one dimension along last axis, got shape {values.shape}')
-        else:
-            values = values.flatten()
 
     #global variance is calculated with the wieghted full neighbors instead of the sampled values, in order to avoid 0 variance
     #if a single value is sampled
-    var = np.cov(values, aweights=(1- jac_dists)**alpha) #global variance weights are proportional to point similarities, not distance
+
+    var = np.cov(values, rowvar = False, aweights=(1- jac_dists.flatten())**alpha) #global variance weights are proportional to point similarities, not distance
     var_factor = get_distribution_var_factor_jaccard(jac_dists, min_var_factor, alpha, func = variance_mapper)
-    pointwise_variance = var*var_factor
+    if var.ndim > 1:
+        broadcasted_var_factor = jac_dists.reshape(jac_dists.shape[0],1)[:, np.newaxis]
+        pointwise_variance = broadcasted_var_factor*var
+    else:
+        pointwise_variance = var_factor*var
     return pointwise_variance
 
 # Cell
@@ -70,40 +70,72 @@ def sample_from_neighbors_continuous(
     size = 100,
     noise_type = 'normal',
     alpha = 1,
+    scale_variance_pointwise = True,
     variance_mapper = 'log',
     min_var_factor = 1e-2,
-    var_preprocess = np.sqrt
 ):
     '''
     samples from neighbor points with noise
 
     returns (samples, idxs)
     '''
-    if len(neighborhood_values.shape) <= 1:
+    #reshape values
+    if neighborhood_values.ndim <= 1:
         neighborhood_values = neighborhood_values.reshape(-1,1)
 
-    pw_var = pointwise_variance(neighborhood_values, jac_dists = jac_dists, min_var_factor = min_var_factor, alpha = alpha)
+    #handle noise_type
+    valid_noise_types = ['normal', 'multivariate_normal', None]
+    if not noise_type in valid_noise_types:
+        raise ValueError(f'noise_type should be one of {valid_noise_types}, got {noise_type}')
+    else:
+        if noise_type == 'normal':
+            var_preprocess = np.sqrt
+            if not neighborhood_values.shape[-1] == 1:
+                raise ValueError(f'for "normal" noise_type, data should be 1d, got shape {neighborhood_values.shape}')
+        elif noise_type == 'multivariate_normal':
+            var_preprocess = lambda x: x
+            if not neighborhood_values.shape[-1] > 1:
+                raise ValueError(f'for "multivariate_normal" noise_type, data should be N-dimensional for N >1, got shape {neighborhood_values.shape}')
+
+
     #apply alppha and l1-normalize sample weights
     sample_weights = (1- jac_dists)**alpha #transform distance into similarity with 1 - jac_d
     sample_weights = sample_weights/sample_weights.sum()
     #sample based on sample weights
     sampled_idxs = np.random.choice(np.arange(neighborhood_values.shape[0]),size = size, p = sample_weights, replace = True)
-    sampled_idxs = sorted(sampled_idxs)
-    unique, counts = np.unique(sampled_idxs, return_counts=True)
+    sampled_idxs = np.sort(sampled_idxs)
 
-    noise_type = getattr(np.random, noise_type)
+    if (not noise_type is None) and (len(neighborhood_values) > 1):
+        #adds noise accordingly
+        pw_var = pointwise_variance(neighborhood_values, jac_dists = jac_dists, min_var_factor = min_var_factor, alpha = alpha)
+        counts = np.bincount(sampled_idxs)
+        msk = counts > 0
+        unique, counts = np.arange(len(counts))[msk], counts[msk]
+        noise_type = getattr(np.random, noise_type)
+        if pw_var.ndim > 1:
+            ndims = pw_var.shape[-1]
+            mean = np.array([0]*ndims)
+        else:
+            mean = 0
 
-    samples = []
-    for i in range(unique.shape[0]):
-        var = pw_var[unique[i]]
+        samples = []
+        for i in range(unique.shape[0]):
+            idx = unique[i]
+            var = pw_var[idx]
+            var = var_preprocess(var)
+            noise = noise_type(mean, var, size = counts[i])
+            sampled_values = neighborhood_values[idx] + noise
+            #samples = np.vstack([samples, sampled_values])
+            samples.append(sampled_values)
 
-        noise = noise_type(0, var_preprocess(var), size = (counts[i],neighborhood_values.shape[-1]))
-        sampled_values = neighborhood_values[unique[i]] + noise
-        sample_idx = sampled_idxs[unique[i]]
-        #samples = np.vstack([samples, sampled_values])
-        samples.append(sampled_values)
 
-    samples = np.vstack(samples)
+        if sampled_values.ndim > 1:
+            samples = np.vstack(samples)
+        else:
+            samples = np.vstack([s.reshape(-1,1) for s in samples])
+    else:
+        #sample without adding noise
+        samples = neighborhood_values[sampled_idxs]
 
     return samples, sampled_idxs
 
@@ -154,17 +186,17 @@ def pointwise_variance(values, jac_dists, min_var_factor = 1e-2, alpha = 1, vari
     the variance of the contribution os different from the (sampling)weight of the point,
     since points with lower similarity will have a higher variance, but will be less likely to be sampled
     '''
-    if len(values.shape) > 1:
-        if values.shape[-1] > 1:
-            raise ValueError(f'value should have only one dimension along last axis, got shape {values.shape}')
-        else:
-            values = values.flatten()
 
     #global variance is calculated with the wieghted full neighbors instead of the sampled values, in order to avoid 0 variance
     #if a single value is sampled
-    var = np.cov(values, aweights=(1- jac_dists)**alpha) #global variance weights are proportional to point similarities, not distance
+
+    var = np.cov(values, rowvar = False, aweights=(1- jac_dists.flatten())**alpha) #global variance weights are proportional to point similarities, not distance
     var_factor = get_distribution_var_factor_jaccard(jac_dists, min_var_factor, alpha, func = variance_mapper)
-    pointwise_variance = var*var_factor
+    if var.ndim > 1:
+        broadcasted_var_factor = jac_dists.reshape(jac_dists.shape[0],1)[:, np.newaxis]
+        pointwise_variance = broadcasted_var_factor*var
+    else:
+        pointwise_variance = var_factor*var
     return pointwise_variance
 
 # Cell
@@ -175,39 +207,71 @@ def sample_from_neighbors_continuous(
     size = 100,
     noise_type = 'normal',
     alpha = 1,
+    scale_variance_pointwise = True,
     variance_mapper = 'log',
     min_var_factor = 1e-2,
-    var_preprocess = np.sqrt
 ):
     '''
     samples from neighbor points with noise
 
     returns (samples, idxs)
     '''
-    if len(neighborhood_values.shape) <= 1:
+    #reshape values
+    if neighborhood_values.ndim <= 1:
         neighborhood_values = neighborhood_values.reshape(-1,1)
 
-    pw_var = pointwise_variance(neighborhood_values, jac_dists = jac_dists, min_var_factor = min_var_factor, alpha = alpha)
+    #handle noise_type
+    valid_noise_types = ['normal', 'multivariate_normal', None]
+    if not noise_type in valid_noise_types:
+        raise ValueError(f'noise_type should be one of {valid_noise_types}, got {noise_type}')
+    else:
+        if noise_type == 'normal':
+            var_preprocess = np.sqrt
+            if not neighborhood_values.shape[-1] == 1:
+                raise ValueError(f'for "normal" noise_type, data should be 1d, got shape {neighborhood_values.shape}')
+        elif noise_type == 'multivariate_normal':
+            var_preprocess = lambda x: x
+            if not neighborhood_values.shape[-1] > 1:
+                raise ValueError(f'for "multivariate_normal" noise_type, data should be N-dimensional for N >1, got shape {neighborhood_values.shape}')
+
+
     #apply alppha and l1-normalize sample weights
     sample_weights = (1- jac_dists)**alpha #transform distance into similarity with 1 - jac_d
     sample_weights = sample_weights/sample_weights.sum()
     #sample based on sample weights
     sampled_idxs = np.random.choice(np.arange(neighborhood_values.shape[0]),size = size, p = sample_weights, replace = True)
-    sampled_idxs = sorted(sampled_idxs)
-    unique, counts = np.unique(sampled_idxs, return_counts=True)
+    sampled_idxs = np.sort(sampled_idxs)
 
-    noise_type = getattr(np.random, noise_type)
+    if (not noise_type is None) and (len(neighborhood_values) > 1):
+        #adds noise accordingly
+        pw_var = pointwise_variance(neighborhood_values, jac_dists = jac_dists, min_var_factor = min_var_factor, alpha = alpha)
+        counts = np.bincount(sampled_idxs)
+        msk = counts > 0
+        unique, counts = np.arange(len(counts))[msk], counts[msk]
+        noise_type = getattr(np.random, noise_type)
+        if pw_var.ndim > 1:
+            ndims = pw_var.shape[-1]
+            mean = np.array([0]*ndims)
+        else:
+            mean = 0
 
-    samples = []
-    for i in range(unique.shape[0]):
-        var = pw_var[unique[i]]
+        samples = []
+        for i in range(unique.shape[0]):
+            idx = unique[i]
+            var = pw_var[idx]
+            var = var_preprocess(var)
+            noise = noise_type(mean, var, size = counts[i])
+            sampled_values = neighborhood_values[idx] + noise
+            #samples = np.vstack([samples, sampled_values])
+            samples.append(sampled_values)
 
-        noise = noise_type(0, var_preprocess(var), size = (counts[i],neighborhood_values.shape[-1]))
-        sampled_values = neighborhood_values[unique[i]] + noise
-        sample_idx = sampled_idxs[unique[i]]
-        #samples = np.vstack([samples, sampled_values])
-        samples.append(sampled_values)
 
-    samples = np.vstack(samples)
+        if sampled_values.ndim > 1:
+            samples = np.vstack(samples)
+        else:
+            samples = np.vstack([s.reshape(-1,1) for s in samples])
+    else:
+        #sample without adding noise
+        samples = neighborhood_values[sampled_idxs]
 
     return samples, sampled_idxs
