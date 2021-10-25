@@ -11,7 +11,7 @@ import statsmodels.api as sm
 
 from .kernel import JaccardForestKernel
 from .utils import hstack, vstack
-from .dist import sample_from_neighbors_continuous
+from .dist import sample_from_neighbors_continuous, estimate_mean_and_variance_from_neighbors
 
 # Cell
 
@@ -58,7 +58,7 @@ import statsmodels.api as sm
 
 from .kernel import JaccardForestKernel
 from .utils import hstack, vstack
-from .dist import sample_from_neighbors_continuous
+from .dist import sample_from_neighbors_continuous, estimate_mean_and_variance_from_neighbors
 
 # Cell
 

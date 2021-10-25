@@ -4,7 +4,9 @@ __all__ = ["index", "modules", "custom_doc_links", "git_url"]
 
 index = {"get_distribution_var_factor_jaccard": "dist.ipynb",
          "pointwise_variance": "dist.ipynb",
+         "estimate_mean_and_variance_from_neighbors": "dist.ipynb",
          "sample_from_neighbors_continuous": "dist.ipynb",
+         "PointwiseGaussianMixture": "dist.ipynb",
          "SMFormulaWrapper": "estimators.ipynb",
          "SMWrapper": "estimators.ipynb",
          "EstimatorKernel": "kernel.ipynb",
