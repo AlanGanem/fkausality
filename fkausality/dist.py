@@ -63,6 +63,11 @@ def pointwise_variance(values, jac_dists, min_var_factor = 1e-2, alpha = 1, vari
     #global variance is calculated with the wieghted full neighbors instead of the sampled values, in order to avoid 0 variance
     #if a single value is sampled
 
+    #expand values if contains only one row, so np.cov won't break
+    if values.shape[0] < 2:
+        values = np.concatenate([values,values])
+        jac_dists = np.concatenate([jac_dists,jac_dists])
+
     var_factor = get_distribution_var_factor_jaccard(jac_dists, min_var_factor, alpha, func = variance_mapper)
     var = np.cov(values, rowvar = False, aweights=(1- jac_dists.flatten())**alpha) #global variance weights are proportional to point similarities, not distance
     if var.ndim > 1:
@@ -70,6 +75,7 @@ def pointwise_variance(values, jac_dists, min_var_factor = 1e-2, alpha = 1, vari
         pointwise_variance = broadcasted_var_factor*var
     else:
         pointwise_variance = var_factor*var
+
     return pointwise_variance
 
 # Cell
@@ -354,6 +360,11 @@ def pointwise_variance(values, jac_dists, min_var_factor = 1e-2, alpha = 1, vari
     #global variance is calculated with the wieghted full neighbors instead of the sampled values, in order to avoid 0 variance
     #if a single value is sampled
 
+    #expand values if contains only one row, so np.cov won't break
+    if values.shape[0] < 2:
+        values = np.concatenate([values,values])
+        jac_dists = np.concatenate([jac_dists,jac_dists])
+
     var_factor = get_distribution_var_factor_jaccard(jac_dists, min_var_factor, alpha, func = variance_mapper)
     var = np.cov(values, rowvar = False, aweights=(1- jac_dists.flatten())**alpha) #global variance weights are proportional to point similarities, not distance
     if var.ndim > 1:
@@ -361,6 +372,7 @@ def pointwise_variance(values, jac_dists, min_var_factor = 1e-2, alpha = 1, vari
         pointwise_variance = broadcasted_var_factor*var
     else:
         pointwise_variance = var_factor*var
+
     return pointwise_variance
 
 # Cell
