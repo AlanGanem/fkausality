@@ -4,6 +4,10 @@ __all__ = ['pandas_gorupby_apply_parallel', 'idxs_split', 'SMFormulaWrapper', 'S
            'pandas_gorupby_apply_parallel', 'idxs_split', 'SMFormulaWrapper', 'SMWrapper', 'CEDTEstimator']
 
 # Cell
+import multiprocessing
+from multiprocessing import Pool, cpu_count
+from functools import partial
+
 import numpy as np
 import pandas as pd
 
@@ -15,10 +19,6 @@ from .utils import hstack, vstack
 from .dist import sample_from_neighbors_continuous, estimate_mean_and_variance_from_neighbors_mixture
 
 # Cell
-
-import multiprocessing
-from multiprocessing import Pool, cpu_count
-from functools import partial
 
 def pandas_gorupby_apply_parallel(dfGrouped, func, **kwargs):
     with Pool(cpu_count()) as p:
@@ -212,6 +212,10 @@ class _FKEstimator(BaseEstimator):
         queries similar datapoints and returns saved_data from queried indexes, alongside
         jaccard dissimilarity
         '''
+        if (hasattr(X, 'index') and hasattr(X, 'columns')): #is a dataframe like
+            original_X_idxs = X.index
+        else:
+            original_X_idxs = np.arange(len(X))
 
         if precomputed_neighbors is None:
             precomputed_neighbors = self.kneighbors(X = X, n_neighbors = n_neighbors, return_distance=True)
@@ -224,9 +228,10 @@ class _FKEstimator(BaseEstimator):
             idx_i = nbrs_idxs[i][msk_i]
             dist_i = dsts[i][msk_i].reshape(-1,1)
             v = self.saved_values_[idx_i]
-            v = np.hstack([v, dist_i, i*np.ones((len(v),1), dtype = int)])
+            v = np.hstack([v, dist_i, original_X_idxs[i]*np.ones((len(v),1), dtype = int)])
             #faster than using .assign
             v = pd.DataFrame(v, columns = self.all_saved_values_columns_ +['dissimilarity', '_index'])
+            v['_index'] = v['_index'].astype(int)
             values.append(v)
 
         return values
@@ -282,6 +287,7 @@ class CEDTEstimator(_FKEstimator):
             sampled_df.columns = self.y_columns_ + ['sample_index']
             sampled_df = sampled_df.reset_index(level = -1, drop = True)
             sampled_df.index = sampled_df.index.set_names(tuple(self.T_columns_))
+            sampled_df['sample_index'] = sampled_df['sample_index'].astype(int)
             sampled_df = sampled_df.set_index('sample_index', append = True)
             sampled_dfs.append(sampled_df)
 
@@ -362,6 +368,10 @@ class CEDTEstimator(_FKEstimator):
         return outcomes
 
 # Cell
+import multiprocessing
+from multiprocessing import Pool, cpu_count
+from functools import partial
+
 import numpy as np
 import pandas as pd
 
@@ -373,10 +383,6 @@ from .utils import hstack, vstack
 from .dist import sample_from_neighbors_continuous, estimate_mean_and_variance_from_neighbors_mixture
 
 # Cell
-
-import multiprocessing
-from multiprocessing import Pool, cpu_count
-from functools import partial
 
 def pandas_gorupby_apply_parallel(dfGrouped, func, **kwargs):
     with Pool(cpu_count()) as p:
@@ -570,6 +576,10 @@ class _FKEstimator(BaseEstimator):
         queries similar datapoints and returns saved_data from queried indexes, alongside
         jaccard dissimilarity
         '''
+        if (hasattr(X, 'index') and hasattr(X, 'columns')): #is a dataframe like
+            original_X_idxs = X.index
+        else:
+            original_X_idxs = np.arange(len(X))
 
         if precomputed_neighbors is None:
             precomputed_neighbors = self.kneighbors(X = X, n_neighbors = n_neighbors, return_distance=True)
@@ -582,9 +592,10 @@ class _FKEstimator(BaseEstimator):
             idx_i = nbrs_idxs[i][msk_i]
             dist_i = dsts[i][msk_i].reshape(-1,1)
             v = self.saved_values_[idx_i]
-            v = np.hstack([v, dist_i, i*np.ones((len(v),1), dtype = int)])
+            v = np.hstack([v, dist_i, original_X_idxs[i]*np.ones((len(v),1), dtype = int)])
             #faster than using .assign
             v = pd.DataFrame(v, columns = self.all_saved_values_columns_ +['dissimilarity', '_index'])
+            v['_index'] = v['_index'].astype(int)
             values.append(v)
 
         return values
@@ -640,6 +651,7 @@ class CEDTEstimator(_FKEstimator):
             sampled_df.columns = self.y_columns_ + ['sample_index']
             sampled_df = sampled_df.reset_index(level = -1, drop = True)
             sampled_df.index = sampled_df.index.set_names(tuple(self.T_columns_))
+            sampled_df['sample_index'] = sampled_df['sample_index'].astype(int)
             sampled_df = sampled_df.set_index('sample_index', append = True)
             sampled_dfs.append(sampled_df)
 

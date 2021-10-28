@@ -29,6 +29,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+fkausality_venv/
 
 
 ### nbdev default .gitignore
