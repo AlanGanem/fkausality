@@ -15,6 +15,7 @@ from functools import partial
 from sklearn.utils import check_array
 
 
+
 # Cell
 def get_distribution_var_factor_jaccard(jac_dists, min_var_factor = 1e-2, alpha = 1, func = 'log'):
     '''
@@ -366,6 +367,7 @@ from scipy import stats
 from sklearn.base import DensityMixin, BaseEstimator
 from functools import partial
 from sklearn.utils import check_array
+
 
 
 # Cell

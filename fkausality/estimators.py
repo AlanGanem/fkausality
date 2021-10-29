@@ -10,6 +10,7 @@ from functools import partial
 
 import numpy as np
 import pandas as pd
+from dask import delayed, compute
 
 from sklearn.base import BaseEstimator, RegressorMixin
 import statsmodels.api as sm
@@ -42,8 +43,35 @@ def idxs_split(a, n, axis = 0, drop_empty = True, return_slices = False):
 
     return idxs
 
-def _agg_mean_variance(df, y_columns, alpha, variance_mapper, min_var_factor):
+def _agg_covariance(df, y_columns, T_columns, alpha):
+    '''
+    covariance of a given target sample in relation to some given Treatment
+    '''
 
+    import statsmodels.api as sm
+    w = (1 - df['dissimilarity'])**alpha
+    model = sm.WLS(df[y_columns],df[T_columns],w).fit()
+
+    std = model.bse
+    #std.columns = ['std' for _ in std.columns]
+    slope = model.params
+    #slope.columns = ['slope' for _ in slope.columns]
+    count = (slope*0+1)*df.shape[0]
+    pvalues = model.pvalues
+
+
+    d = [slope,std,count, pvalues]
+
+    idx = pd.Index(['slope','std','count','p_value'], name = 'statistic')
+    d = pd.DataFrame(d, index = idx)
+
+
+    return d
+
+def _agg_mean_variance(df, y_columns, alpha, variance_mapper, min_var_factor):
+    '''
+    calculates mean and variance for a given sample in groupby
+    '''
     mean, var = estimate_mean_and_variance_from_neighbors_mixture(
         df[y_columns].values,
         df['dissimilarity'].values,
@@ -52,14 +80,18 @@ def _agg_mean_variance(df, y_columns, alpha, variance_mapper, min_var_factor):
         min_var_factor = min_var_factor,
     )
 
+    count = df.shape[0]
     if var.ndim > 1:
-        var = var.diagonal()
-        d = np.concatenate([mean,var]).reshape(2,len(y_columns))
+
+        std = std.diagonal()**(1/2)
+        d = np.concatenate([mean,var,count*np.ones(mean.shape)]).reshape(3,len(y_columns))
     else:
-        d = [mean,var]
+        d = [mean,std,count]
 
     d = pd.DataFrame(d)
-    d.index = pd.Index(['mean','variance'], name = 'statistic')
+
+
+    d.index = pd.Index(['mean','std','count'], name = 'statistic')
     d.columns = y_columns
 
     return d
@@ -294,7 +326,7 @@ class CEDTEstimator(_FKEstimator):
         return sampled_dfs
 
 
-    def outcomes(
+    def potential_outcomes(
         self,
         X = None,
         n_neighbors = None,
@@ -335,7 +367,7 @@ class CEDTEstimator(_FKEstimator):
 
     ):
 
-        outcomes = self.outcomes(
+        outcomes = self.potential_outcomes(
             X = X,
             n_neighbors = n_neighbors,
             precomputed_neighbors = precomputed_neighbors,
@@ -374,6 +406,7 @@ from functools import partial
 
 import numpy as np
 import pandas as pd
+from dask import delayed, compute
 
 from sklearn.base import BaseEstimator, RegressorMixin
 import statsmodels.api as sm
@@ -406,8 +439,35 @@ def idxs_split(a, n, axis = 0, drop_empty = True, return_slices = False):
 
     return idxs
 
-def _agg_mean_variance(df, y_columns, alpha, variance_mapper, min_var_factor):
+def _agg_covariance(df, y_columns, T_columns, alpha):
+    '''
+    covariance of a given target sample in relation to some given Treatment
+    '''
 
+    import statsmodels.api as sm
+    w = (1 - df['dissimilarity'])**alpha
+    model = sm.WLS(df[y_columns],df[T_columns],w).fit()
+
+    std = model.bse
+    #std.columns = ['std' for _ in std.columns]
+    slope = model.params
+    #slope.columns = ['slope' for _ in slope.columns]
+    count = (slope*0+1)*df.shape[0]
+    pvalues = model.pvalues
+
+
+    d = [slope,std,count, pvalues]
+
+    idx = pd.Index(['slope','std','count','p_value'], name = 'statistic')
+    d = pd.DataFrame(d, index = idx)
+
+
+    return d
+
+def _agg_mean_variance(df, y_columns, alpha, variance_mapper, min_var_factor):
+    '''
+    calculates mean and variance for a given sample in groupby
+    '''
     mean, var = estimate_mean_and_variance_from_neighbors_mixture(
         df[y_columns].values,
         df['dissimilarity'].values,
@@ -416,14 +476,18 @@ def _agg_mean_variance(df, y_columns, alpha, variance_mapper, min_var_factor):
         min_var_factor = min_var_factor,
     )
 
+    count = df.shape[0]
     if var.ndim > 1:
-        var = var.diagonal()
-        d = np.concatenate([mean,var]).reshape(2,len(y_columns))
+
+        std = std.diagonal()**(1/2)
+        d = np.concatenate([mean,var,count*np.ones(mean.shape)]).reshape(3,len(y_columns))
     else:
-        d = [mean,var]
+        d = [mean,std,count]
 
     d = pd.DataFrame(d)
-    d.index = pd.Index(['mean','variance'], name = 'statistic')
+
+
+    d.index = pd.Index(['mean','std','count'], name = 'statistic')
     d.columns = y_columns
 
     return d
@@ -658,7 +722,7 @@ class CEDTEstimator(_FKEstimator):
         return sampled_dfs
 
 
-    def outcomes(
+    def potential_outcomes(
         self,
         X = None,
         n_neighbors = None,
@@ -699,7 +763,7 @@ class CEDTEstimator(_FKEstimator):
 
     ):
 
-        outcomes = self.outcomes(
+        outcomes = self.potential_outcomes(
             X = X,
             n_neighbors = n_neighbors,
             precomputed_neighbors = precomputed_neighbors,
