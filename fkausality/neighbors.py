@@ -15,7 +15,7 @@ import nmslib
 
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from .utils import sparsify, hstack, vstack, stack, RobustEncoder
+from .utils import vstack
 
 # Cell
 class NMSLibSklearnWrapper(BaseEstimator):
@@ -315,7 +315,7 @@ import nmslib
 
 from sklearn.base import BaseEstimator, TransformerMixin
 
-from .utils import sparsify, hstack, vstack, stack, RobustEncoder
+from .utils import vstack
 
 # Cell
 class NMSLibSklearnWrapper(BaseEstimator):

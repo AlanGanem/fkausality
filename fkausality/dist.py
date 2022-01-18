@@ -282,14 +282,14 @@ class JaccardPointwiseGaussianMixture(DensityMixin, BaseEstimator):
 
     def __init__(
         self,
-        pointwse_distribution = 'normal',
+        pointwise_distribution = 'normal',
         alpha = 1,
         scale_variance_pointwise = True,
         variance_mapper = 'log',
         min_var_factor = 1e-2,
     ):
 
-        self.pointwse_distribution = pontiwse_distribution
+        self.pointwise_distribution = pointwise_distribution
         self.alpha = alpha
         self.scale_variance_pointwise = scale_variance_pointwise
         self.variance_mapper = variance_mapper
@@ -636,14 +636,14 @@ class JaccardPointwiseGaussianMixture(DensityMixin, BaseEstimator):
 
     def __init__(
         self,
-        pointwse_distribution = 'normal',
+        pointwise_distribution = 'normal',
         alpha = 1,
         scale_variance_pointwise = True,
         variance_mapper = 'log',
         min_var_factor = 1e-2,
     ):
 
-        self.pointwse_distribution = pontiwse_distribution
+        self.pointwise_distribution = pointwise_distribution
         self.alpha = alpha
         self.scale_variance_pointwise = scale_variance_pointwise
         self.variance_mapper = variance_mapper

@@ -2,7 +2,10 @@
 
 __all__ = ["index", "modules", "custom_doc_links", "git_url"]
 
-index = {"get_distribution_var_factor_jaccard": "dist.ipynb",
+index = {"sigmoid": "data.ipynb",
+         "make_bimodal_assymetric_regression": "data.ipynb",
+         "make_confounded_data": "data.ipynb",
+         "get_distribution_var_factor_jaccard": "dist.ipynb",
          "pointwise_variance": "dist.ipynb",
          "estimate_mean_and_variance_from_neighbors_mixture": "dist.ipynb",
          "sample_from_neighbors_continuous": "dist.ipynb",
@@ -13,17 +16,6 @@ index = {"get_distribution_var_factor_jaccard": "dist.ipynb",
          "SMFormulaWrapper": "estimators.ipynb",
          "SMWrapper": "estimators.ipynb",
          "CEDTEstimator": "estimators.ipynb",
-         "EstimatorKernel": "kernel.ipynb",
-         "JaccardForestKernel": "kernel.ipynb",
-         "CategoricalLinearKernel": "kernel.ipynb",
-         "ClassificationLinearBottleneck": "kernel.ipynb",
-         "RegressionLinearBottleneck": "kernel.ipynb",
-         "MLPKernel": "kernel.ipynb",
-         "BOWKernel": "kernel.ipynb",
-         "NMSLibSklearnWrapper": "neighbors.ipynb",
-         "FastJaccardNN": "neighbors.ipynb",
-         "FastL2NN": "neighbors.ipynb",
-         "FastKLDivNN": "neighbors.ipynb",
          "parallel_apply": "utils.ipynb",
          "get_default_args": "utils.ipynb",
          "inherit_docstrings": "utils.ipynb",
@@ -38,10 +30,9 @@ index = {"get_distribution_var_factor_jaccard": "dist.ipynb",
          "stack": "utils.ipynb",
          "RobustEncoder": "utils.ipynb"}
 
-modules = ["dist.py",
+modules = ["data.py",
+           "dist.py",
            "estimators.py",
-           "kernel.py",
-           "neighbors.py",
            "utils.py"]
 
 doc_url = "https://AlanGanem.github.io/fkausality/fkausality/"

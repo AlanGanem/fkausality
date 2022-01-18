@@ -10,12 +10,11 @@ from functools import partial
 
 import numpy as np
 import pandas as pd
-from dask import delayed, compute
 
 from sklearn.base import BaseEstimator, RegressorMixin
 import statsmodels.api as sm
 
-from .kernel import JaccardForestKernel
+from heartwood.kernel import JaccardForestKernel
 from .utils import hstack, vstack
 from .dist import sample_from_neighbors_continuous, estimate_mean_and_variance_from_neighbors_mixture
 
@@ -83,15 +82,16 @@ def _agg_mean_variance(df, y_columns, alpha, variance_mapper, min_var_factor):
     count = df.shape[0]
     if var.ndim > 1:
 
-        std = std.diagonal()**(1/2)
+        #std = var.diagonal()**(1/2)
         d = np.concatenate([mean,var,count*np.ones(mean.shape)]).reshape(3,len(y_columns))
     else:
-        d = [mean,std,count]
+        #std = var**1/2
+        d = [mean,var,count]
 
     d = pd.DataFrame(d)
 
 
-    d.index = pd.Index(['mean','std','count'], name = 'statistic')
+    d.index = pd.Index(['mean','variance','count'], name = 'statistic')
     d.columns = y_columns
 
     return d
@@ -132,10 +132,11 @@ class SMWrapper(BaseEstimator, RegressorMixin):
 
 # Cell
 class _FKEstimator(BaseEstimator):
-
+    #TODO: let user choose whether to fit on treatment assignment, outcome or both
     def __init__(
         self,
-        tree_ensemble_estimator,
+        treatment_tree_ensemble_estimator,
+        target_tree_ensemble_estimator = None,
         #pointwise variance args
         pointwise_variance_dist = 'normal',
         pointwise_variance_alpha = 1,
@@ -148,8 +149,46 @@ class _FKEstimator(BaseEstimator):
 
     ):
 
+        '''
+        Base class for ForestKernel Causal estimator
+
+        Parameters
+        ----------
+
+        treatment_tree_ensemble_estimator: Tree ensemble estimator containning the apply method or None
+
+            Model to orthogonalize w.r.t. treatment. if None, the orthogonalization will be performed w.r.t. target only. At least one of
+            target_tree_ensemble_estimator or treatment_tree_ensemble_estimator should be passed
+
+        target_tree_ensemble_estimator: Tree ensemble estimator containning the apply method or None. Default = None
+
+            Model to orthogonalize w.r.t. target. if None, the orthogonalization will be performed w.r.t. treatment only. At least one of
+            target_tree_ensemble_estimator or treatment_tree_ensemble_estimator should be passed
+
+        pointwise_variance_dist: valid numpy distribution method. Default = 'normal'
+            distribution to define pointwise sampling. A point is treated as a distribution centered in its value and its variance will be defined by a function of the Jaccard dissimilarity
+            of this point w.r.t. the queried point
+
+
+        pointwise_variance_alpha: float, Default = 1.0
+            alpha parameter for the sampled points. it will spread or concentrate dissimilarities. dist = dist**alpha.
+
+        pointwise_variance_min_var: float, default = 1e-2
+            min variance factor (when dissimilarity = 0) for the pointwise sampling
+
+        n_neighbors
+
+        index_time_params
+
+        query_time_params
+
+        n_jobs
+
+
+        '''
         #tree estimator
-        self.tree_ensemble_estimator = tree_ensemble_estimator
+        self.treatment_tree_ensemble_estimator = treatment_tree_ensemble_estimator
+        self.target_tree_ensemble_estimator = target_tree_ensemble_estimator
         #pointiwse variance for sampling
         self.pointwise_variance_dist = pointwise_variance_dist
         self.pointwise_variance_alpha = pointwise_variance_alpha
@@ -163,13 +202,53 @@ class _FKEstimator(BaseEstimator):
 
     def fit(self, X, y = None, T = None, save_values = None, **kwargs):
 
-        #fit matching forest estimator
-        self.forest_estimator_kernel = JaccardForestKernel(
-            estimator=self.tree_ensemble_estimator,
-            n_neighbors=self.n_neighbors,
-            index_time_params=self.index_time_params,
-            query_time_params=self.query_time_params,
-        )
+        if (self.treatment_tree_ensemble_estimator is None) and (self.target_tree_ensemble_estimator is None):
+            raise ValueError('At least one of [treatment_tree_ensemble_estimator, target_tree_ensemble_estimator] must be not None')
+        else:
+
+            if self.treatment_tree_ensemble_estimator is None:
+                #only target orthogonalization
+                forest_estimator_kernel = JaccardForestKernel(
+                    estimator=self.target_tree_ensemble_estimator,
+                    n_neighbors=self.n_neighbors,
+                    index_time_params=self.index_time_params,
+                    query_time_params=self.query_time_params,
+                )
+
+                self.forest_estimator_kernel = [
+                    forest_estimator_kernel.fit(X, y = y, **kwargs) #matching esstimator regress X on y
+                ]
+            elif self.target_tree_ensemble_estimator is None:
+                #only treatment orthogonalization
+                forest_estimator_kernel = JaccardForestKernel(
+                    estimator=self.treatment_tree_ensemble_estimator,
+                    n_neighbors=self.n_neighbors,
+                    index_time_params=self.index_time_params,
+                    query_time_params=self.query_time_params,
+                )
+                self.forest_estimator_kernel = [
+                    forest_estimator_kernel.fit(X, y = T, **kwargs) #matching esstimator regress X on T
+                ]
+            else:
+                #orthogonalize on the union of treatment and target orthogonalized points
+                treatment_tree_ensemble_estimator = JaccardForestKernel(
+                    estimator=self.treatment_tree_ensemble_estimator,
+                    n_neighbors=self.n_neighbors,
+                    index_time_params=self.index_time_params,
+                    query_time_params=self.query_time_params,
+                )
+
+                target_forest_estimator_kernel = JaccardForestKernel(
+                    estimator=self.target_tree_ensemble_estimator,
+                    n_neighbors=self.n_neighbors,
+                    index_time_params=self.index_time_params,
+                    query_time_params=self.query_time_params,
+                )
+                self.forest_estimator_kernel = [
+                    treatment_tree_ensemble_estimator.fit(X, y = T, **kwargs), #matching esstimator regress X on T
+                    target_forest_estimator_kernel.fit(X, y = y, **kwargs) #matching esstimator regress X on y
+                ]
+
 
         #handle save values
         if not save_values is None:
@@ -216,8 +295,6 @@ class _FKEstimator(BaseEstimator):
         #hstack save_values to y and T
         save_values = hstack([save_values, T, y])[:, keep_cols_msk]
 
-        self.forest_estimator_kernel.fit(X, y = T, save_values = save_values, **kwargs) #matching esstimator regress X on T
-
         self.saved_values_ = save_values
         self.save_values_columns_ = save_values_columns_
         self.T_columns_ = T_columns_
@@ -229,15 +306,28 @@ class _FKEstimator(BaseEstimator):
         #list is returned from query, so we have to iterate
     #    return [pd.DataFrame(v, columns = self.all_saved_values_columns_) for v in values]
 
-    def kneighbors(self, X = None, n_neighbors = None, return_distance = False, query_from = None):
+    def kneighbors(self, X = None, n_neighbors = None, query_from = None):
+
         if not query_from is None:
             params = self.forest_estimator_kernel.nearest_neighbors_estimator.get_params()
             klass = self.forest_estimator_kernel.nearest_neighbors_estimator.__class__
             knn_estim = klass(**params).fit(X)
+            dists, idxs = knn_estim.kneighbors(X = X, n_neighbors = n_neighbors, return_distance = True)
         else:
             knn_estim = self.forest_estimator_kernel
+            if len(knn_estim) > 1: #if orthogonalization with both target and treatment
+                result = [
+                    knn_estim[0].kneighbors(X = X, n_neighbors = n_neighbors//2, return_distance = True),
+                    knn_estim[1].kneighbors(X = X, n_neighbors = n_neighbors//2 + n_neighbors%2, return_distance = True),
+                ]
+                dists = result[0][0], result[1][0]
+                idxs = result[0][1], result[1][1]
+                dists = [np.hstack([dists[0][i], dists[1][i]]) for i in range(len(X))]
+                idxs = [np.hstack([idxs[0][i], idxs[1][i]]) for i in range(len(X))]
+            else:
+                dists, idxs = knn_estim[0].kneighbors(X = X, n_neighbors = n_neighbors, return_distance = True)
 
-        return knn_estim.kneighbors(X = X, n_neighbors = n_neighbors, return_distance = return_distance)
+        return dists, idxs
 
     def query(self, X = None, n_neighbors = None, precomputed_neighbors = None):
         '''
@@ -250,7 +340,7 @@ class _FKEstimator(BaseEstimator):
             original_X_idxs = np.arange(len(X))
 
         if precomputed_neighbors is None:
-            precomputed_neighbors = self.kneighbors(X = X, n_neighbors = n_neighbors, return_distance=True)
+            precomputed_neighbors = self.kneighbors(X = X, n_neighbors = n_neighbors)
 
         dsts, nbrs_idxs = precomputed_neighbors
 
@@ -262,7 +352,7 @@ class _FKEstimator(BaseEstimator):
             v = self.saved_values_[idx_i]
             v = np.hstack([v, dist_i, original_X_idxs[i]*np.ones((len(v),1), dtype = int)])
             #faster than using .assign
-            v = pd.DataFrame(v, columns = self.all_saved_values_columns_ +['dissimilarity', '_index'])
+            v = pd.DataFrame(v, columns = self.all_saved_values_columns_ + ['dissimilarity', '_index'])
             v['_index'] = v['_index'].astype(int)
             values.append(v)
 
@@ -274,7 +364,7 @@ class _FKEstimator(BaseEstimator):
 # Cell
 class CEDTEstimator(_FKEstimator):
     '''
-    Continuous Effect - Discrete Treatmet estimator
+    Continuous Effect - Discrete Treatment estimator
     '''
     def sample(
         self,
@@ -386,14 +476,14 @@ class CEDTEstimator(_FKEstimator):
         c_idx_var = slice(None), *control, 'variance'
         t_idx_var = slice(None), *[slice(None)]*len(control),'variance'
 
-        means = outcomes.loc[t_idx_mean] - outcomes.loc[c_idx_mean]
-        var = outcomes.loc[t_idx_var] + outcomes.loc[c_idx_var]
+        means = outcomes.loc[t_idx_mean] - outcomes.loc[c_idx_mean].reset_index(level = [*range(1,len(c_idx_mean))], drop = True)
+        var = outcomes.loc[t_idx_var] + outcomes.loc[c_idx_var].reset_index(level = [*range(1,len(c_idx_mean))], drop = True)
 
         var['statistic'] = 'variance'
         means['statistic'] = 'mean'
 
-        var = var.set_index('statistic', append = True)
-        means = means.set_index('statistic', append = True)
+        #var = var.set_index('statistic', append = True)
+        #means = means.set_index('statistic', append = True)
 
         outcomes.loc[var.index] = var
         outcomes.loc[means.index] = means
@@ -406,12 +496,11 @@ from functools import partial
 
 import numpy as np
 import pandas as pd
-from dask import delayed, compute
 
 from sklearn.base import BaseEstimator, RegressorMixin
 import statsmodels.api as sm
 
-from .kernel import JaccardForestKernel
+from heartwood.kernel import JaccardForestKernel
 from .utils import hstack, vstack
 from .dist import sample_from_neighbors_continuous, estimate_mean_and_variance_from_neighbors_mixture
 
@@ -479,15 +568,16 @@ def _agg_mean_variance(df, y_columns, alpha, variance_mapper, min_var_factor):
     count = df.shape[0]
     if var.ndim > 1:
 
-        std = std.diagonal()**(1/2)
+        #std = var.diagonal()**(1/2)
         d = np.concatenate([mean,var,count*np.ones(mean.shape)]).reshape(3,len(y_columns))
     else:
-        d = [mean,std,count]
+        #std = var**1/2
+        d = [mean,var,count]
 
     d = pd.DataFrame(d)
 
 
-    d.index = pd.Index(['mean','std','count'], name = 'statistic')
+    d.index = pd.Index(['mean','variance','count'], name = 'statistic')
     d.columns = y_columns
 
     return d
@@ -528,10 +618,11 @@ class SMWrapper(BaseEstimator, RegressorMixin):
 
 # Cell
 class _FKEstimator(BaseEstimator):
-
+    #TODO: let user choose whether to fit on treatment assignment, outcome or both
     def __init__(
         self,
-        tree_ensemble_estimator,
+        treatment_tree_ensemble_estimator,
+        target_tree_ensemble_estimator = None,
         #pointwise variance args
         pointwise_variance_dist = 'normal',
         pointwise_variance_alpha = 1,
@@ -544,8 +635,46 @@ class _FKEstimator(BaseEstimator):
 
     ):
 
+        '''
+        Base class for ForestKernel Causal estimator
+
+        Parameters
+        ----------
+
+        treatment_tree_ensemble_estimator: Tree ensemble estimator containning the apply method or None
+
+            Model to orthogonalize w.r.t. treatment. if None, the orthogonalization will be performed w.r.t. target only. At least one of
+            target_tree_ensemble_estimator or treatment_tree_ensemble_estimator should be passed
+
+        target_tree_ensemble_estimator: Tree ensemble estimator containning the apply method or None. Default = None
+
+            Model to orthogonalize w.r.t. target. if None, the orthogonalization will be performed w.r.t. treatment only. At least one of
+            target_tree_ensemble_estimator or treatment_tree_ensemble_estimator should be passed
+
+        pointwise_variance_dist: valid numpy distribution method. Default = 'normal'
+            distribution to define pointwise sampling. A point is treated as a distribution centered in its value and its variance will be defined by a function of the Jaccard dissimilarity
+            of this point w.r.t. the queried point
+
+
+        pointwise_variance_alpha: float, Default = 1.0
+            alpha parameter for the sampled points. it will spread or concentrate dissimilarities. dist = dist**alpha.
+
+        pointwise_variance_min_var: float, default = 1e-2
+            min variance factor (when dissimilarity = 0) for the pointwise sampling
+
+        n_neighbors
+
+        index_time_params
+
+        query_time_params
+
+        n_jobs
+
+
+        '''
         #tree estimator
-        self.tree_ensemble_estimator = tree_ensemble_estimator
+        self.treatment_tree_ensemble_estimator = treatment_tree_ensemble_estimator
+        self.target_tree_ensemble_estimator = target_tree_ensemble_estimator
         #pointiwse variance for sampling
         self.pointwise_variance_dist = pointwise_variance_dist
         self.pointwise_variance_alpha = pointwise_variance_alpha
@@ -559,13 +688,53 @@ class _FKEstimator(BaseEstimator):
 
     def fit(self, X, y = None, T = None, save_values = None, **kwargs):
 
-        #fit matching forest estimator
-        self.forest_estimator_kernel = JaccardForestKernel(
-            estimator=self.tree_ensemble_estimator,
-            n_neighbors=self.n_neighbors,
-            index_time_params=self.index_time_params,
-            query_time_params=self.query_time_params,
-        )
+        if (self.treatment_tree_ensemble_estimator is None) and (self.target_tree_ensemble_estimator is None):
+            raise ValueError('At least one of [treatment_tree_ensemble_estimator, target_tree_ensemble_estimator] must be not None')
+        else:
+
+            if self.treatment_tree_ensemble_estimator is None:
+                #only target orthogonalization
+                forest_estimator_kernel = JaccardForestKernel(
+                    estimator=self.target_tree_ensemble_estimator,
+                    n_neighbors=self.n_neighbors,
+                    index_time_params=self.index_time_params,
+                    query_time_params=self.query_time_params,
+                )
+
+                self.forest_estimator_kernel = [
+                    forest_estimator_kernel.fit(X, y = y, **kwargs) #matching esstimator regress X on y
+                ]
+            elif self.target_tree_ensemble_estimator is None:
+                #only treatment orthogonalization
+                forest_estimator_kernel = JaccardForestKernel(
+                    estimator=self.treatment_tree_ensemble_estimator,
+                    n_neighbors=self.n_neighbors,
+                    index_time_params=self.index_time_params,
+                    query_time_params=self.query_time_params,
+                )
+                self.forest_estimator_kernel = [
+                    forest_estimator_kernel.fit(X, y = T, **kwargs) #matching esstimator regress X on T
+                ]
+            else:
+                #orthogonalize on the union of treatment and target orthogonalized points
+                treatment_tree_ensemble_estimator = JaccardForestKernel(
+                    estimator=self.treatment_tree_ensemble_estimator,
+                    n_neighbors=self.n_neighbors,
+                    index_time_params=self.index_time_params,
+                    query_time_params=self.query_time_params,
+                )
+
+                target_forest_estimator_kernel = JaccardForestKernel(
+                    estimator=self.target_tree_ensemble_estimator,
+                    n_neighbors=self.n_neighbors,
+                    index_time_params=self.index_time_params,
+                    query_time_params=self.query_time_params,
+                )
+                self.forest_estimator_kernel = [
+                    treatment_tree_ensemble_estimator.fit(X, y = T, **kwargs), #matching esstimator regress X on T
+                    target_forest_estimator_kernel.fit(X, y = y, **kwargs) #matching esstimator regress X on y
+                ]
+
 
         #handle save values
         if not save_values is None:
@@ -612,8 +781,6 @@ class _FKEstimator(BaseEstimator):
         #hstack save_values to y and T
         save_values = hstack([save_values, T, y])[:, keep_cols_msk]
 
-        self.forest_estimator_kernel.fit(X, y = T, save_values = save_values, **kwargs) #matching esstimator regress X on T
-
         self.saved_values_ = save_values
         self.save_values_columns_ = save_values_columns_
         self.T_columns_ = T_columns_
@@ -625,15 +792,28 @@ class _FKEstimator(BaseEstimator):
         #list is returned from query, so we have to iterate
     #    return [pd.DataFrame(v, columns = self.all_saved_values_columns_) for v in values]
 
-    def kneighbors(self, X = None, n_neighbors = None, return_distance = False, query_from = None):
+    def kneighbors(self, X = None, n_neighbors = None, query_from = None):
+
         if not query_from is None:
             params = self.forest_estimator_kernel.nearest_neighbors_estimator.get_params()
             klass = self.forest_estimator_kernel.nearest_neighbors_estimator.__class__
             knn_estim = klass(**params).fit(X)
+            dists, idxs = knn_estim.kneighbors(X = X, n_neighbors = n_neighbors, return_distance = True)
         else:
             knn_estim = self.forest_estimator_kernel
+            if len(knn_estim) > 1: #if orthogonalization with both target and treatment
+                result = [
+                    knn_estim[0].kneighbors(X = X, n_neighbors = n_neighbors//2, return_distance = True),
+                    knn_estim[1].kneighbors(X = X, n_neighbors = n_neighbors//2 + n_neighbors%2, return_distance = True),
+                ]
+                dists = result[0][0], result[1][0]
+                idxs = result[0][1], result[1][1]
+                dists = [np.hstack([dists[0][i], dists[1][i]]) for i in range(len(X))]
+                idxs = [np.hstack([idxs[0][i], idxs[1][i]]) for i in range(len(X))]
+            else:
+                dists, idxs = knn_estim[0].kneighbors(X = X, n_neighbors = n_neighbors, return_distance = True)
 
-        return knn_estim.kneighbors(X = X, n_neighbors = n_neighbors, return_distance = return_distance)
+        return dists, idxs
 
     def query(self, X = None, n_neighbors = None, precomputed_neighbors = None):
         '''
@@ -646,7 +826,7 @@ class _FKEstimator(BaseEstimator):
             original_X_idxs = np.arange(len(X))
 
         if precomputed_neighbors is None:
-            precomputed_neighbors = self.kneighbors(X = X, n_neighbors = n_neighbors, return_distance=True)
+            precomputed_neighbors = self.kneighbors(X = X, n_neighbors = n_neighbors)
 
         dsts, nbrs_idxs = precomputed_neighbors
 
@@ -658,7 +838,7 @@ class _FKEstimator(BaseEstimator):
             v = self.saved_values_[idx_i]
             v = np.hstack([v, dist_i, original_X_idxs[i]*np.ones((len(v),1), dtype = int)])
             #faster than using .assign
-            v = pd.DataFrame(v, columns = self.all_saved_values_columns_ +['dissimilarity', '_index'])
+            v = pd.DataFrame(v, columns = self.all_saved_values_columns_ + ['dissimilarity', '_index'])
             v['_index'] = v['_index'].astype(int)
             values.append(v)
 
@@ -670,7 +850,7 @@ class _FKEstimator(BaseEstimator):
 # Cell
 class CEDTEstimator(_FKEstimator):
     '''
-    Continuous Effect - Discrete Treatmet estimator
+    Continuous Effect - Discrete Treatment estimator
     '''
     def sample(
         self,
@@ -782,14 +962,14 @@ class CEDTEstimator(_FKEstimator):
         c_idx_var = slice(None), *control, 'variance'
         t_idx_var = slice(None), *[slice(None)]*len(control),'variance'
 
-        means = outcomes.loc[t_idx_mean] - outcomes.loc[c_idx_mean]
-        var = outcomes.loc[t_idx_var] + outcomes.loc[c_idx_var]
+        means = outcomes.loc[t_idx_mean] - outcomes.loc[c_idx_mean].reset_index(level = [*range(1,len(c_idx_mean))], drop = True)
+        var = outcomes.loc[t_idx_var] + outcomes.loc[c_idx_var].reset_index(level = [*range(1,len(c_idx_mean))], drop = True)
 
         var['statistic'] = 'variance'
         means['statistic'] = 'mean'
 
-        var = var.set_index('statistic', append = True)
-        means = means.set_index('statistic', append = True)
+        #var = var.set_index('statistic', append = True)
+        #means = means.set_index('statistic', append = True)
 
         outcomes.loc[var.index] = var
         outcomes.loc[means.index] = means
